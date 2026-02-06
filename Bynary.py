@@ -4,6 +4,7 @@ import os
 
 def run_binary_program(bitstream, output_window):
     registers = [0] * 16
+    memory = [0] * 256  # 256 bytes of memory
     program_counter = 0
     instructions = [bitstream[i:i+8] for i in range(0, len(bitstream), 8)]
 
@@ -14,27 +15,171 @@ def run_binary_program(bitstream, output_window):
         operation = instruction[:4]
         register_index = int(instruction[4:], 2)
 
-        if operation == "0000":  # No operation
+        if operation == "0000":  # NOOP - do nothing
             continue
 
-        elif operation == "0001":  # Load value into register
+        elif operation == "0001":  # LOAD - load value into register
             value = int(instructions[program_counter], 2)
             program_counter += 1
             registers[register_index] = value
 
-        elif operation == "0010":  # Add 1 to register
+        elif operation == "0010":  # ADD - add 1 to register
             registers[register_index] += 1
 
-        elif operation == "0011":  # Subtract 1 from register
+        elif operation == "0011":  # SUB - subtract 1 from register
             registers[register_index] -= 1
 
-        elif operation == "0100":  # Print register as number
+        elif operation == "0100":  # PRINT - print number
             output_window.addstr(str(registers[register_index]) + "\n")
 
-        elif operation == "1001":  # Print register as character
+        elif operation == "0101":  # COPY - copy reg to reg (next byte: source reg in bits 0-3, dest in 4-7)
+            next_byte = int(instructions[program_counter], 2)
+            program_counter += 1
+            source_reg = (next_byte >> 4) & 0x0F
+            dest_reg = next_byte & 0x0F
+            registers[dest_reg] = registers[source_reg]
+
+        elif operation == "0110":  # JNZ - jump if register not zero
+            jump_address = int(instructions[program_counter], 2)
+            program_counter += 1
+            if registers[register_index] != 0:
+                program_counter = jump_address
+
+        elif operation == "0111":  # JMP - jump always
+            jump_address = int(instructions[program_counter], 2)
+            program_counter += 1
+            program_counter = jump_address
+
+        elif operation == "1001":  # PRINTC - print character
             output_window.addstr(chr(registers[register_index]))
 
-        elif operation == "1000":  # End program
+        elif operation == "1010":  # INPUT - get character from user and store ASCII value
+            curses.echo()
+            output_window.addstr("Input: ")
+            output_window.refresh()
+            char = output_window.getch()
+            curses.noecho()
+            registers[register_index] = char if char != -1 else 0
+
+        elif operation == "1011":  # ADDR - add two registers (next byte: src1 in bits 0-3, src2 in 4-7, result in current reg)
+            next_byte = int(instructions[program_counter], 2)
+            program_counter += 1
+            src1 = (next_byte >> 4) & 0x0F
+            src2 = next_byte & 0x0F
+            registers[register_index] = registers[src1] + registers[src2]
+
+        elif operation == "1100":  # SUBR - subtract registers (reg = src1 - src2)
+            next_byte = int(instructions[program_counter], 2)
+            program_counter += 1
+            src1 = (next_byte >> 4) & 0x0F
+            src2 = next_byte & 0x0F
+            registers[register_index] = registers[src1] - registers[src2]
+
+        elif operation == "1101":  # MULR - multiply registers
+            next_byte = int(instructions[program_counter], 2)
+            program_counter += 1
+            src1 = (next_byte >> 4) & 0x0F
+            src2 = next_byte & 0x0F
+            registers[register_index] = registers[src1] * registers[src2]
+
+        elif operation == "1110":  # DIVR - divide registers (integer division)
+            next_byte = int(instructions[program_counter], 2)
+            program_counter += 1
+            src1 = (next_byte >> 4) & 0x0F
+            src2 = next_byte & 0x0F
+            if registers[src2] != 0:
+                registers[register_index] = registers[src1] // registers[src2]
+            else:
+                output_window.addstr("ERROR: Division by zero\n")
+
+        elif operation == "1111":  # Extended operations (next byte determines operation)
+            ext_op = int(instructions[program_counter], 2)
+            program_counter += 1
+            
+            if ext_op == 0:  # MOD - modulo (next byte: src1, src2)
+                next_byte = int(instructions[program_counter], 2)
+                program_counter += 1
+                src1 = (next_byte >> 4) & 0x0F
+                src2 = next_byte & 0x0F
+                if registers[src2] != 0:
+                    registers[register_index] = registers[src1] % registers[src2]
+                    
+            elif ext_op == 1:  # CMP - compare and set flag (sets reg to 1 if src1 < src2, 0 if equal, -1 if >)
+                next_byte = int(instructions[program_counter], 2)
+                program_counter += 1
+                src1 = (next_byte >> 4) & 0x0F
+                src2 = next_byte & 0x0F
+                if registers[src1] < registers[src2]:
+                    registers[register_index] = 1
+                elif registers[src1] == registers[src2]:
+                    registers[register_index] = 0
+                else:
+                    registers[register_index] = 255  # -1 in unsigned
+                    
+            elif ext_op == 2:  # STORE - store register to memory
+                addr = int(instructions[program_counter], 2)
+                program_counter += 1
+                memory[addr] = registers[register_index]
+                
+            elif ext_op == 3:  # LOAD_MEM - load from memory to register
+                addr = int(instructions[program_counter], 2)
+                program_counter += 1
+                registers[register_index] = memory[addr]
+                
+            elif ext_op == 4:  # JZ - jump if zero
+                jump_address = int(instructions[program_counter], 2)
+                program_counter += 1
+                if registers[register_index] == 0:
+                    program_counter = jump_address
+                    
+            elif ext_op == 5:  # JLT - jump if less than (reg < 128, treating as signed)
+                jump_address = int(instructions[program_counter], 2)
+                program_counter += 1
+                if registers[register_index] > 127:  # negative in signed 8-bit
+                    program_counter = jump_address
+                    
+            elif ext_op == 6:  # AND - bitwise AND
+                next_byte = int(instructions[program_counter], 2)
+                program_counter += 1
+                src1 = (next_byte >> 4) & 0x0F
+                src2 = next_byte & 0x0F
+                registers[register_index] = registers[src1] & registers[src2]
+                
+            elif ext_op == 7:  # OR - bitwise OR
+                next_byte = int(instructions[program_counter], 2)
+                program_counter += 1
+                src1 = (next_byte >> 4) & 0x0F
+                src2 = next_byte & 0x0F
+                registers[register_index] = registers[src1] | registers[src2]
+                
+            elif ext_op == 8:  # XOR - bitwise XOR
+                next_byte = int(instructions[program_counter], 2)
+                program_counter += 1
+                src1 = (next_byte >> 4) & 0x0F
+                src2 = next_byte & 0x0F
+                registers[register_index] = registers[src1] ^ registers[src2]
+                
+            elif ext_op == 9:  # SHL - shift left
+                registers[register_index] = (registers[register_index] << 1) & 0xFF
+                
+            elif ext_op == 10:  # SHR - shift right
+                registers[register_index] = registers[register_index] >> 1
+                
+            elif ext_op == 11:  # PRINTN - print number without newline
+                output_window.addstr(str(registers[register_index]))
+                
+            elif ext_op == 12:  # INPUTN - input a number
+                curses.echo()
+                output_window.addstr("Enter number: ")
+                output_window.refresh()
+                num_str = output_window.getstr(10, 10, 10).decode()
+                curses.noecho()
+                try:
+                    registers[register_index] = int(num_str) & 0xFF
+                except:
+                    registers[register_index] = 0
+
+        elif operation == "1000":  # END - stop program
             break
 
         else:
