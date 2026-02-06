@@ -18,7 +18,7 @@ Each byte is split into two parts:
 -Last 4 bits → register number
 
 **Instruction**
-
+```
 0000 NOOP      do nothing
 0001 LOAD      load value into register (next byte = value)
 0010 ADD       add 1 to register
@@ -28,7 +28,7 @@ Each byte is split into two parts:
 0110 JNZ       jump if register not zero
 0111 JMP       jump always
 1000 END       stop program
-
+```
 
 ### How to get "Hello"
 ```
